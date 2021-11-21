@@ -1,63 +1,104 @@
-import './sass/main.scss';
+import './css/styles.css';
+import { getImages } from './js/pixabay.js';
+import { Notify } from 'notiflix/build/notiflix-notify-aio';
+import 'notiflix/dist/notiflix-3.2.2.min.css';
+import SimpleLightbox from 'simplelightbox';
 import 'simplelightbox/dist/simple-lightbox.min.css';
-import Notiflix from 'notiflix';
-import ImagesAPIService from './js/imagesAPIService';
-import { hideLoadMoreBtn, showLoadMoreBtn, imagesMarkup } from './js/imagesMarkup';
 
-export const PER_PAGE = 40;
+const formRef = document.querySelector('#search-form');
+const galleryRef = document.querySelector('.gallery');
+const btnLoadRef = document.querySelector('.load-more');
 
-const refs = {
-  searchForm: document.querySelector('.search-form'),
-  loadMoreButton: document.querySelector('.load-more'),
-  imagesContainer: document.querySelector('.gallery'),
-};
+btnLoadRef.classList.add('hidden');
+let page = 1;
+const per_page = 40;
+let inputName = '';
+let gallery = {};
 
-hideLoadMoreBtn();
+formRef.addEventListener('submit', onSubmitForm);
+btnLoadRef.addEventListener('click', onBtnLoadClick);
 
-const imagesAPIService = new ImagesAPIService();
-refs.searchForm.addEventListener('submit', onSearch);
-refs.loadMoreButton.addEventListener('click', onLoadMore);
-
-function onSearch(event) {
+async function onSubmitForm(event) {
   event.preventDefault();
-  hideLoadMoreBtn();
-  imagesAPIService.query = event.currentTarget.elements.searchQuery.value;
-  imagesAPIService.resetPage();
-  if (imagesAPIService.query === '' || imagesAPIService.query === ' ') {
-    Notiflix.Notify.info('Enter your query to search images.');
-    renderImages('');
+  galleryRef.innerHTML = '';
+  page = 1;
+  btnLoadRef.classList.add('hidden');
+  inputName = event.target.searchQuery.value;
+
+  if (inputName.trim() === '') {
     return;
   }
-  imagesAPIService.getImages().then(imagesMarkup).then(renderImages).then(onFound);
-  imagesAPIService.incrementPage();
-}
 
-function onLoadMore(event) {
-  imagesAPIService.getImages().then(imagesMarkup).then(renderMoreImages);
-  imagesAPIService.incrementPage();
-}
+  try {
+    const data = await getImages(inputName.trim(), page, per_page);
 
-function renderImages(markup) {
-  refs.imagesContainer.innerHTML = markup;
-  imagesAPIService.createGallery();
-  return imagesAPIService.totalHits;
-}
+    if (data.hits.length === 0) {
+      Notify.failure('Sorry, there are no images matching your search query. Please try again.', {
+        timeout: 3000,
+      });
+    } else {
+      Notify.success(`Hooray! We found ${data.totalHits} images`, { timeout: 2500 });
+      markImageCard(data.hits);
+      gallery = new SimpleLightbox('.gallery a', { captionsData: 'alt', captionDelay: 250 });
 
-function renderMoreImages(markup) {
-  if (imagesAPIService.totalHits <= PER_PAGE * (imagesAPIService.page - 1)) {
-    hideLoadMoreBtn();
-    Notiflix.Notify.info("We're sorry, but you've reached the end of search results.");
+      page * per_page <= data.totalHits && btnLoadRef.classList.remove('hidden');
+
+      page += 1;
+    }
+  } catch (error) {
+    console.log(error.message);
   }
-  refs.imagesContainer.insertAdjacentHTML('beforeend', markup);
-  imagesAPIService.updateGallery();
 }
 
-function onFound(total) {
-  if (total > 0) {
-    Notiflix.Notify.success(`Hooray! We found ${total} images.`);
-  }
+async function onBtnLoadClick() {
+  try {
+    const data = await getImages(inputName.trim(), page, per_page);
 
-  if (total > PER_PAGE && imagesAPIService.page > 1) {
-    showLoadMoreBtn();
+    if (page * per_page >= data.totalHits) {
+      btnLoadRef.classList.add('hidden');
+      Notify.info("We're sorry, but you've reached the end of search results.", { timeout: 4000 });
+    }
+
+    markImageCard(data.hits);
+    gallery.refresh();
+    page += 1;
+
+    const { height } = document.querySelector('.gallery').firstElementChild.getBoundingClientRect();
+    window.scrollBy({
+      top: height * 2,
+      behavior: 'smooth',
+    });
+  } catch (error) {
+    console.log(error.message);
   }
+}
+
+function markImageCard(images) {
+  const markUp = images
+    .map(image => {
+      const { webformatURL, largeImageURL, tags, likes, views, comments, downloads } = image;
+      return `<a class="gallery__item" href="${largeImageURL}">
+    <div class="photo-card">
+      <div class="wrapper-img">
+        <img src="${webformatURL}" alt="${tags}" loading="lazy" />
+      </div>  
+      <div class="info">
+        <p class="info-item">
+          <b>Likes </b>${likes}
+        </p>
+        <p class="info-item">
+          <b>Views </b>${views}
+        </p>
+        <p class="info-item">
+          <b>Comments </b>${comments}
+        </p>
+        <p class="info-item">
+          <b>Downloads </b>${downloads}
+        </p>
+      </div>
+    </div>
+  </a>`;
+    })
+    .join('');
+  galleryRef.insertAdjacentHTML('beforeend', markUp);
 }
